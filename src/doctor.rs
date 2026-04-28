@@ -63,19 +63,28 @@ pub fn run(config: Config) -> Result<(), String> {
                         .as_array()
                         .map(|a| a.len())
                         .unwrap_or(0);
-                    let waiting = v["result"]["notifications"]
+                    let (menu, free, unknown) = v["result"]["notifications"]
                         .as_array()
                         .map(|arr| {
-                            arr.iter()
-                                .filter(|n| {
-                                    !n["is_read"].as_bool().unwrap_or(true)
-                                        && cmux::is_waiting(n["body"].as_str().unwrap_or(""))
-                                })
-                                .count()
+                            let mut m = 0;
+                            let mut f = 0;
+                            let mut u = 0;
+                            for n in arr {
+                                if n["is_read"].as_bool().unwrap_or(true) {
+                                    continue;
+                                }
+                                let body = n["body"].as_str().unwrap_or("");
+                                match cmux::classify_body(body) {
+                                    cmux::BodyKind::Menu => m += 1,
+                                    cmux::BodyKind::FreeText => f += 1,
+                                    cmux::BodyKind::Unknown => u += 1,
+                                }
+                            }
+                            (m, f, u)
                         })
-                        .unwrap_or(0);
+                        .unwrap_or((0, 0, 0));
                     println!(
-                        "[\u{2713}] notification.list -> {total} total, {waiting} waiting"
+                        "[\u{2713}] notification.list -> {total} total, unread: {menu} menu / {free} free-text / {unknown} other"
                     );
                     ok += 1;
                 }

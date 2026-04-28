@@ -33,38 +33,63 @@ impl Client {
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct WaitingSurface {
     pub surface_id: String,
     pub body: String,
     pub workspace_id: String,
+    pub kind: BodyKind,
 }
 
-pub fn find_waiting_surface(client: &mut Client) -> std::io::Result<Option<WaitingSurface>> {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BodyKind {
+    /// Permission / numbered menu — Claude is waiting for a 1/2/3 choice.
+    Menu,
+    /// Empty input prompt — Claude is waiting for arbitrary text.
+    FreeText,
+    /// Some other notification (task summary, custom hooks, etc.).
+    Unknown,
+}
+
+pub fn classify_body(body: &str) -> BodyKind {
+    if body.contains("needs your permission") {
+        BodyKind::Menu
+    } else if body.contains("waiting for your input") {
+        BodyKind::FreeText
+    } else {
+        BodyKind::Unknown
+    }
+}
+
+pub fn find_waiting_surfaces(client: &mut Client) -> std::io::Result<Vec<WaitingSurface>> {
     let resp = client.call("notification.list", json!({}))?;
     let Some(notifications) = resp["result"]["notifications"].as_array() else {
-        return Ok(None);
+        return Ok(vec![]);
     };
+    let mut out = vec![];
     for n in notifications {
         if n["is_read"].as_bool().unwrap_or(true) {
             continue;
         }
         let body = n["body"].as_str().unwrap_or("");
-        if !is_waiting(body) {
+        let kind = classify_body(body);
+        if matches!(kind, BodyKind::Unknown) && !is_actionable(body) {
             continue;
         }
         if let Some(surface_id) = n["surface_id"].as_str() {
-            return Ok(Some(WaitingSurface {
+            out.push(WaitingSurface {
                 surface_id: surface_id.to_string(),
                 body: body.to_string(),
                 workspace_id: n["workspace_id"].as_str().unwrap_or("").to_string(),
-            }));
+                kind,
+            });
         }
     }
-    Ok(None)
+    Ok(out)
 }
 
-pub fn is_waiting(body: &str) -> bool {
-    body.contains("waiting for your input") || body.contains("needs your permission")
+fn is_actionable(body: &str) -> bool {
+    body.contains("waiting") || body.contains("permission") || body.contains("approval")
 }
 
 pub fn inject_text(client: &mut Client, surface_id: &str, text: &str) -> std::io::Result<()> {
@@ -132,6 +157,30 @@ pub fn detect_prompt_kind(screen: &str) -> PromptKind {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn classifies_permission_as_menu() {
+        assert_eq!(
+            classify_body("Claude needs your permission to use Bash"),
+            BodyKind::Menu
+        );
+    }
+
+    #[test]
+    fn classifies_input_wait_as_free_text() {
+        assert_eq!(
+            classify_body("Claude is waiting for your input"),
+            BodyKind::FreeText
+        );
+    }
+
+    #[test]
+    fn classifies_task_summary_as_unknown() {
+        assert_eq!(
+            classify_body("작업 완료. 파일 3개 수정됨."),
+            BodyKind::Unknown
+        );
+    }
 
     #[test]
     fn detects_numbered_menu_dot() {
