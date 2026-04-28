@@ -11,3 +11,5 @@ keywords = ["cli", "hotkey", "agent", "cmux", "tmux"]
 categories = ["command-line-utilities"]
 
 [dependencies]
+core-foundation = "0.10.1"
+global-hotkey = "0.7.0"
