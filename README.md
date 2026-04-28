@@ -128,9 +128,12 @@ and is the most common reason a registered hotkey never fires).
   on the v0.x roadmap.
 - **Requires cmux as the backend.** Notification routing depends on cmux's
   socket API. tmux backend planned for v0.2.
-- **Single-target routing when multiple agents are waiting.** lazyack picks
-  the first menu candidate and ignores the rest. Multi-session HUD with
-  preview + confirm is planned for v0.2.
+- **Sequential routing when multiple agents are waiting.** Each press picks
+  the first menu candidate cmux returns; consumed-tracking ensures the next
+  press picks the next one. Works well for "same answer to all" but means
+  the user can't pick a specific session from a queue. v0.2 introduces a
+  threshold-based delegation (skip + ask user to handle in cmux directly)
+  for ambiguous cases.
 - **Pattern-matching pane detection.** When the notification body doesn't
   clearly indicate menu vs free-text, lazyack falls back to scanning the last
   20 lines of the pane for `1.` / `[1]` / `[2]` patterns. False negatives
@@ -138,17 +141,65 @@ and is the most common reason a registered hotkey never fires).
 
 ## Roadmap
 
-- [x] cmux backend
+### v0.1.0 — released
+
+- [x] cmux backend (`notification.list` + `surface.send_text`)
 - [x] JSON config (`~/.config/lazyack/config.json` or `--config <path>`)
-- [x] `lazyack doctor` diagnostics
+- [x] `lazyack doctor` diagnostics with cmux + hotkey + Karabiner checks
 - [x] Body-kind classification (Menu / FreeText / Unknown)
-- [x] Pane pattern matching as defense-in-depth
+- [x] Pane pattern matching as defense-in-depth for Unknown bodies
 - [x] Consumed-notification tracking (no double injection)
-- [ ] Multi-session peek HUD with confirm
-- [ ] tmux backend
-- [ ] Per-agent profiles (Codex `y/n`, Aider, ...)
-- [ ] Dangerous-command auto-reject heuristics (`rm -rf`, force push, etc.)
-- [ ] macOS notification action buttons
+- [x] Homebrew tap (`AngryCatKR96/homebrew-lazyack`)
+
+### v0.2.0 — safer multi-session
+
+- [ ] **Delegation when ambiguous**: configurable threshold (default ≥2 menu
+      candidates) → lazyack skips auto-fire and points the user to cmux's
+      sidebar. Keeps the common single-session path zero-friction while
+      removing the "wrong session got '1'" risk for accumulated queues.
+- [ ] **Routing log enrichment**: body preview + remaining-waiting count
+      after each fire so the user can audit what was sent without opening
+      cmux.
+- [ ] **`--cautious` opt-in mode**: brief macOS notification with the target
+      preview before fire; press Esc within ~1.5s to cancel. Useful right
+      before merges, deploys, etc.
+
+### v0.3.0 — cross-tool
+
+- [ ] tmux backend (`tmux send-keys` + `capture-pane`)
+- [ ] Per-agent profiles (Claude Code 1/2/3, Codex `y/n`, Aider, ...)
+
+### v0.4.0+ — guards
+
+- [ ] Dangerous-command auto-reject heuristics (`rm -rf`, force push,
+      `DROP TABLE`, `--no-verify`, ...)
+- [ ] Live status in macOS notification (action-button preview)
+- [ ] Multi-workspace scan (revisit if cmux notification timing improves
+      upstream)
+
+### Considered, not planned
+
+- ~~Full HUD with peek + confirm UI~~ — replaced by v0.2's delegation
+  approach. Building a Cocoa HUD would widen lazyack's identity from a
+  tiny daemon into a GUI app, add Accessibility-permission requirements,
+  and slow the common single-session case for benefit only in the rare
+  many-session case (which delegation handles by stepping back).
+- ~~Pane scan fallback for missed notifications~~ — implemented in
+  `4132651`, reverted in `b765c98` after side-effect review (TTL
+  regression in the consumed tracker, scan↔notification race producing
+  double-injection, false positives on numbered output that wasn't a
+  menu, current-workspace blindness). May revisit if cmux exposes better
+  notification timing/state APIs that close the gap directly.
+
+### Upstream (cmux)
+
+Issues we'd like to file/PR with [cmux](https://github.com/manaflow-ai/cmux):
+
+- `notification.dismiss(id)` so external tools can mark a single
+  notification handled without nuking the rest. Currently
+  `notification.clear` ignores parameters and wipes everything.
+- A `kind` field on notifications (`menu` / `free_text` / `task_complete`
+  / `permission`) so consumers don't have to substring-match the body.
 
 ## Contributing
 
