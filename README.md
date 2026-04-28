@@ -139,67 +139,28 @@ and is the most common reason a registered hotkey never fires).
   20 lines of the pane for `1.` / `[1]` / `[2]` patterns. False negatives
   are possible if Claude Code changes its TUI format.
 
-## Roadmap
+## Changes
 
-### v0.1.0 — released
+See [Releases](https://github.com/AngryCatKR96/lazyack/releases) and the
+[git history](https://github.com/AngryCatKR96/lazyack/commits/main). New
+features land as the need shows up — no committed roadmap.
 
-- [x] cmux backend (`notification.list` + `surface.send_text`)
-- [x] JSON config (`~/.config/lazyack/config.json` or `--config <path>`)
-- [x] `lazyack doctor` diagnostics with cmux + hotkey + Karabiner checks
-- [x] Body-kind classification (Menu / FreeText / Unknown)
-- [x] Pane pattern matching as defense-in-depth for Unknown bodies
-- [x] Consumed-notification tracking (no double injection)
-- [x] Homebrew tap (`AngryCatKR96/homebrew-lazyack`)
+### Notable design choices
 
-### v0.2.0 — safer multi-session
-
-- [ ] **Delegation when ambiguous**: configurable threshold (default ≥2 menu
-      candidates) → lazyack skips auto-fire and points the user to cmux's
-      sidebar. Keeps the common single-session path zero-friction while
-      removing the "wrong session got '1'" risk for accumulated queues.
-- [ ] **Routing log enrichment**: body preview + remaining-waiting count
-      after each fire so the user can audit what was sent without opening
-      cmux.
-- [ ] **`--cautious` opt-in mode**: brief macOS notification with the target
-      preview before fire; press Esc within ~1.5s to cancel. Useful right
-      before merges, deploys, etc.
-
-### v0.3.0 — cross-tool
-
-- [ ] tmux backend (`tmux send-keys` + `capture-pane`)
-- [ ] Per-agent profiles (Claude Code 1/2/3, Codex `y/n`, Aider, ...)
-
-### v0.4.0+ — guards
-
-- [ ] Dangerous-command auto-reject heuristics (`rm -rf`, force push,
-      `DROP TABLE`, `--no-verify`, ...)
-- [ ] Live status in macOS notification (action-button preview)
-- [ ] Multi-workspace scan (revisit if cmux notification timing improves
-      upstream)
-
-### Considered, not planned
-
-- ~~Full HUD with peek + confirm UI~~ — replaced by v0.2's delegation
-  approach. Building a Cocoa HUD would widen lazyack's identity from a
-  tiny daemon into a GUI app, add Accessibility-permission requirements,
-  and slow the common single-session case for benefit only in the rare
-  many-session case (which delegation handles by stepping back).
-- ~~Pane scan fallback for missed notifications~~ — implemented in
-  `4132651`, reverted in `b765c98` after side-effect review (TTL
-  regression in the consumed tracker, scan↔notification race producing
-  double-injection, false positives on numbered output that wasn't a
-  menu, current-workspace blindness). May revisit if cmux exposes better
-  notification timing/state APIs that close the gap directly.
-
-### Upstream (cmux)
-
-Issues we'd like to file/PR with [cmux](https://github.com/manaflow-ai/cmux):
-
-- `notification.dismiss(id)` so external tools can mark a single
-  notification handled without nuking the rest. Currently
-  `notification.clear` ignores parameters and wipes everything.
-- A `kind` field on notifications (`menu` / `free_text` / `task_complete`
-  / `permission`) so consumers don't have to substring-match the body.
+- **No HUD/GUI.** lazyack stays a tiny daemon. When auto-routing is
+  ambiguous (multiple menus competing for the same hotkey), the
+  long-term plan is to step back and let cmux's sidebar do the
+  disambiguation, not to grow into a GUI app.
+- **Pane scan fallback was tried and reverted.** Commits `4132651` /
+  `b765c98`. Closing the "menu shown but cmux notification not yet
+  fired" timing gap via pane scanning produced too many subtle issues
+  (consumed-tracker TTL regression, scan↔notification double-fire race,
+  numbered-output false positives, current-workspace blindness). May
+  revisit if cmux exposes better notification timing/state APIs.
+- **Granular notification dismiss is a cmux limitation.**
+  `notification.clear` ignores parameters and wipes everything, so
+  lazyack tracks consumed notifications in-process instead of asking
+  cmux to mark a single one read.
 
 ## Contributing
 
