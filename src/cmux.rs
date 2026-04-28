@@ -116,44 +116,6 @@ pub fn read_text(client: &mut Client, surface_id: &str, lines: u32) -> std::io::
     Ok(resp["result"]["text"].as_str().unwrap_or("").to_string())
 }
 
-/// Fallback: when no waiting notification exists, scan terminal surfaces
-/// in the current workspace for visible numbered-menu prompts. Useful when
-/// an agent is showing a menu but cmux hasn't received the OSC yet.
-pub fn scan_panes_for_menu(client: &mut Client) -> std::io::Result<Option<WaitingSurface>> {
-    let resp = client.call("surface.list", json!({}))?;
-    let workspace_id = resp["result"]["workspace_id"]
-        .as_str()
-        .unwrap_or("")
-        .to_string();
-
-    let Some(surfaces) = resp["result"]["surfaces"].as_array() else {
-        return Ok(None);
-    };
-
-    for s in surfaces {
-        if s["type"].as_str() != Some("terminal") {
-            continue;
-        }
-        let Some(surface_id) = s["id"].as_str() else {
-            continue;
-        };
-        let text = match read_text(client, surface_id, 30) {
-            Ok(t) => t,
-            Err(_) => continue,
-        };
-        if detect_prompt_kind(&text) == PromptKind::NumberedMenu {
-            return Ok(Some(WaitingSurface {
-                notification_id: format!("scan:{surface_id}"),
-                surface_id: surface_id.to_string(),
-                body: "(detected via pane scan — no cmux notification yet)".to_string(),
-                workspace_id: workspace_id.clone(),
-                kind: BodyKind::Menu,
-            }));
-        }
-    }
-    Ok(None)
-}
-
 #[derive(Debug, PartialEq, Eq)]
 pub enum PromptKind {
     NumberedMenu,

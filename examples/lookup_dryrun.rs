@@ -8,14 +8,7 @@ fn main() -> std::io::Result<()> {
     println!("waiting candidates: {}", candidates.len());
 
     if candidates.is_empty() {
-        println!("(no waiting agent via notification.list — checking pane scan fallback)\n");
-        match cmux::scan_panes_for_menu(&mut client)? {
-            Some(s) => println!(
-                "[scan path] found menu on surface {}\n  body: {}",
-                s.surface_id, s.body
-            ),
-            None => println!("[scan path] no terminal surface currently shows a numbered menu"),
-        }
+        println!("(no waiting agent — hotkey would be a no-op)");
         return Ok(());
     }
 
@@ -56,15 +49,6 @@ fn main() -> std::io::Result<()> {
     println!("\nnon-digit hotkey (e.g. \"y\\n\"):");
     if let Some(t) = candidates.first() {
         println!("  -> {} ({:?})", t.surface_id, t.kind);
-    }
-
-    println!("\n--- pane scan (also runs as a fallback when no notification waits) ---");
-    match cmux::scan_panes_for_menu(&mut client)? {
-        Some(s) => println!(
-            "  scan would have routed to: {} (kind={:?})",
-            s.surface_id, s.kind
-        ),
-        None => println!("  no terminal surface currently shows a numbered menu"),
     }
 
     Ok(())

@@ -1,5 +1,5 @@
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
 use global_hotkey::{
@@ -10,8 +10,6 @@ use tao::event_loop::{ControlFlow, EventLoopBuilder};
 
 use crate::cmux::{self, BodyKind, WaitingSurface};
 use crate::config::{Binding, Config, parse_hotkey};
-
-const CONSUMED_TTL: Duration = Duration::from_secs(60);
 
 pub fn run(config: Config) -> Result<(), String> {
     let event_loop = EventLoopBuilder::new().build();
@@ -33,7 +31,7 @@ pub fn run(config: Config) -> Result<(), String> {
     println!("\nlazyack ready. Ctrl+C to exit.\n");
 
     let receiver = GlobalHotKeyEvent::receiver();
-    let consumed: RefCell<HashMap<String, Instant>> = RefCell::new(HashMap::new());
+    let consumed: RefCell<HashSet<String>> = RefCell::new(HashSet::new());
 
     event_loop.run(move |_event, _, control_flow| {
         *control_flow = ControlFlow::WaitUntil(Instant::now() + Duration::from_millis(300));
@@ -48,7 +46,7 @@ pub fn run(config: Config) -> Result<(), String> {
     });
 }
 
-fn handle_press(binding: &Binding, consumed: &RefCell<HashMap<String, Instant>>) {
+fn handle_press(binding: &Binding, consumed: &RefCell<HashSet<String>>) {
     let socket = cmux::socket_path();
     let mut client = match cmux::Client::connect(&socket) {
         Ok(c) => c,
@@ -58,11 +56,7 @@ fn handle_press(binding: &Binding, consumed: &RefCell<HashMap<String, Instant>>)
         }
     };
 
-    consumed
-        .borrow_mut()
-        .retain(|_, t| t.elapsed() < CONSUMED_TTL);
-
-    let mut all = match cmux::find_waiting_surfaces(&mut client) {
+    let all = match cmux::find_waiting_surfaces(&mut client) {
         Ok(v) => v,
         Err(e) => {
             eprintln!("[error] notification query: {e}");
@@ -70,26 +64,15 @@ fn handle_press(binding: &Binding, consumed: &RefCell<HashMap<String, Instant>>)
         }
     };
 
-    let is_digit = needs_menu_check(&binding.send);
-
-    if all.is_empty() && is_digit {
-        match cmux::scan_panes_for_menu(&mut client) {
-            Ok(Some(scanned)) => {
-                println!(
-                    "[scan] no cmux notification yet, but pane shows menu: {}",
-                    scanned.surface_id
-                );
-                all.push(scanned);
-            }
-            Ok(None) => {}
-            Err(e) => eprintln!("[warn] pane scan failed: {e}"),
-        }
+    {
+        let live: HashSet<&str> = all.iter().map(|c| c.notification_id.as_str()).collect();
+        consumed.borrow_mut().retain(|id| live.contains(id.as_str()));
     }
 
     let candidates: Vec<&WaitingSurface> = {
-        let map = consumed.borrow();
+        let consumed_ref = consumed.borrow();
         all.iter()
-            .filter(|c| !map.contains_key(&c.notification_id))
+            .filter(|c| !consumed_ref.contains(&c.notification_id))
             .collect()
     };
 
@@ -98,14 +81,15 @@ fn handle_press(binding: &Binding, consumed: &RefCell<HashMap<String, Instant>>)
             println!("[skip] {} pressed but no waiting agent", binding.hotkey);
         } else {
             println!(
-                "[skip] {} pressed but all {} candidate(s) already handled (TTL {}s)",
+                "[skip] {} pressed but all {} waiting notification(s) already handled by lazyack",
                 binding.hotkey,
-                all.len(),
-                CONSUMED_TTL.as_secs()
+                all.len()
             );
         }
         return;
     }
+
+    let is_digit = needs_menu_check(&binding.send);
 
     let target = pick_target(&candidates, is_digit);
     let Some(target) = target else {
@@ -144,9 +128,7 @@ fn handle_press(binding: &Binding, consumed: &RefCell<HashMap<String, Instant>>)
 
     match cmux::inject_text(&mut client, &target.surface_id, &binding.send) {
         Ok(()) => {
-            consumed
-                .borrow_mut()
-                .insert(target.notification_id.clone(), Instant::now());
+            consumed.borrow_mut().insert(target.notification_id.clone());
             println!("    \u{2713} sent");
         }
         Err(e) => eprintln!("    \u{2717} {e}"),
@@ -190,9 +172,9 @@ fn needs_menu_check(send: &str) -> bool {
 mod tests {
     use super::*;
 
-    fn ws(kind: BodyKind, body: &str, notif_id: &str) -> WaitingSurface {
+    fn ws(kind: BodyKind, body: &str) -> WaitingSurface {
         WaitingSurface {
-            notification_id: notif_id.to_string(),
+            notification_id: format!("N-{body}"),
             surface_id: format!("S-{body}"),
             body: body.to_string(),
             workspace_id: "W".to_string(),
@@ -215,8 +197,8 @@ mod tests {
     #[test]
     fn picks_menu_over_freetext_for_digit() {
         let owned = vec![
-            ws(BodyKind::FreeText, "waiting", "n1"),
-            ws(BodyKind::Menu, "permission", "n2"),
+            ws(BodyKind::FreeText, "waiting for your input"),
+            ws(BodyKind::Menu, "needs your permission to use Bash"),
         ];
         let cands: Vec<&WaitingSurface> = owned.iter().collect();
         let chosen = pick_target(&cands, true).unwrap();
@@ -225,7 +207,7 @@ mod tests {
 
     #[test]
     fn returns_none_when_only_freetext_for_digit() {
-        let owned = vec![ws(BodyKind::FreeText, "waiting", "n1")];
+        let owned = vec![ws(BodyKind::FreeText, "waiting for your input")];
         let cands: Vec<&WaitingSurface> = owned.iter().collect();
         assert!(pick_target(&cands, true).is_none());
     }
@@ -233,8 +215,8 @@ mod tests {
     #[test]
     fn picks_first_for_non_digit() {
         let owned = vec![
-            ws(BodyKind::FreeText, "waiting", "n1"),
-            ws(BodyKind::Menu, "permission", "n2"),
+            ws(BodyKind::FreeText, "waiting for your input"),
+            ws(BodyKind::Menu, "needs your permission"),
         ];
         let cands: Vec<&WaitingSurface> = owned.iter().collect();
         let chosen = pick_target(&cands, false).unwrap();
