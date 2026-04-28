@@ -1,3 +1,5 @@
+use std::os::unix::io::IntoRawFd;
+use std::os::unix::net::UnixStream;
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command as ProcCommand, ExitCode, Stdio};
@@ -129,12 +131,20 @@ fn spawn_detached() -> std::io::Result<()> {
         .append(true)
         .open(&log_path)?;
 
+    // Open the cmux connection while we still have a valid parent chain.
+    // cmux only checks "started inside cmux" at accept() time — a fresh
+    // connect from PPID=launchd (the orphaned daemon) gets "Access denied",
+    // but an already-accepted fd keeps working after we reparent. We hand
+    // it to the child via env var.
+    let cmux_fd = open_inheritable_cmux_fd()?;
+
     let mut cmd = ProcCommand::new(&exe);
     let args: Vec<String> = std::env::args()
         .skip(1)
         .filter(|a| a != "-d" && a != "--daemon")
         .collect();
     cmd.args(&args);
+    cmd.env("LAZYACK_CMUX_FD", cmux_fd.to_string());
     cmd.stdin(Stdio::null());
     cmd.stdout(Stdio::from(log_file.try_clone()?));
     cmd.stderr(Stdio::from(log_file));
@@ -157,6 +167,27 @@ fn spawn_detached() -> std::io::Result<()> {
     );
     println!("Stop with: lazyack stop");
     Ok(())
+}
+
+/// Open a cmux socket fd that survives execvp into the daemon child.
+/// Connects, then clears FD_CLOEXEC so the fd is inherited across exec.
+/// The fd is intentionally leaked — both parent and child end up holding
+/// it; the parent's reference is reaped when it exits, the child keeps
+/// using it.
+fn open_inheritable_cmux_fd() -> std::io::Result<i32> {
+    let socket_path = lazyack::cmux::socket_path();
+    let stream = UnixStream::connect(&socket_path)?;
+    let fd = stream.into_raw_fd();
+    unsafe {
+        let flags = libc::fcntl(fd, libc::F_GETFD);
+        if flags == -1 {
+            return Err(std::io::Error::last_os_error());
+        }
+        if libc::fcntl(fd, libc::F_SETFD, flags & !libc::FD_CLOEXEC) == -1 {
+            return Err(std::io::Error::last_os_error());
+        }
+    }
+    Ok(fd)
 }
 
 fn status() -> std::io::Result<Option<u32>> {
