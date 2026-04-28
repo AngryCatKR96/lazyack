@@ -1,5 +1,6 @@
 use std::env;
 use std::io::{BufRead, BufReader, Write};
+use std::os::unix::io::FromRawFd;
 use std::os::unix::net::UnixStream;
 
 use serde_json::{Value, json};
@@ -18,6 +19,24 @@ pub struct Client {
 impl Client {
     pub fn connect(path: &str) -> std::io::Result<Self> {
         let stream = UnixStream::connect(path)?;
+        Self::from_stream(stream)
+    }
+
+    /// Wrap a UnixStream fd inherited from a parent process. The daemon spawn
+    /// path uses this so the orphaned child can keep using the parent's
+    /// already-authenticated cmux connection — cmux only validates the parent
+    /// chain at accept() time, so a fresh connect from PPID=launchd is denied
+    /// but a still-open inherited socket keeps working.
+    ///
+    /// # Safety
+    /// `fd` must be an open Unix socket connected to cmux, and the caller must
+    /// give up ownership of it (this Client takes over closing it on drop).
+    pub unsafe fn from_raw_fd(fd: i32) -> std::io::Result<Self> {
+        let stream = unsafe { UnixStream::from_raw_fd(fd) };
+        Self::from_stream(stream)
+    }
+
+    fn from_stream(stream: UnixStream) -> std::io::Result<Self> {
         let writer = stream.try_clone()?;
         let reader = BufReader::new(stream);
         Ok(Self { writer, reader })

@@ -8,8 +8,12 @@ use global_hotkey::{
 };
 use tao::event_loop::{ControlFlow, EventLoopBuilder};
 
-use crate::cmux::{self, BodyKind, WaitingSurface};
+use crate::cmux::{self, BodyKind, Client, WaitingSurface};
 use crate::config::{Binding, Config, parse_hotkey};
+
+/// Env var the daemon-mode parent sets when handing off an
+/// already-authenticated cmux fd to the orphaned child.
+const INHERITED_FD_ENV: &str = "LAZYACK_CMUX_FD";
 
 pub fn run(config: Config) -> Result<(), String> {
     let event_loop = EventLoopBuilder::new().build();
@@ -32,6 +36,7 @@ pub fn run(config: Config) -> Result<(), String> {
 
     let receiver = GlobalHotKeyEvent::receiver();
     let consumed: RefCell<HashSet<String>> = RefCell::new(HashSet::new());
+    let client_cell: RefCell<Option<Client>> = RefCell::new(initial_client());
 
     event_loop.run(move |_event, _, control_flow| {
         *control_flow = ControlFlow::WaitUntil(Instant::now() + Duration::from_millis(300));
@@ -40,26 +45,64 @@ pub fn run(config: Config) -> Result<(), String> {
                 continue;
             }
             if let Some(binding) = binding_by_id.get(&event.id) {
-                handle_press(binding, &consumed);
+                handle_press(binding, &consumed, &client_cell);
             }
         }
     });
 }
 
-fn handle_press(binding: &Binding, consumed: &RefCell<HashSet<String>>) {
-    let socket = cmux::socket_path();
-    let mut client = match cmux::Client::connect(&socket) {
-        Ok(c) => c,
+/// Build the cmux client used for the daemon's lifetime.
+/// In `lazyack run -d` the parent opens the connection while it still has a
+/// valid cmux parent chain and passes the fd via `LAZYACK_CMUX_FD`. In
+/// foreground mode (no env var set), connect fresh.
+fn initial_client() -> Option<Client> {
+    if let Ok(fd_str) = std::env::var(INHERITED_FD_ENV) {
+        // SAFETY: we trust spawn_detached to set this var only when it has
+        // just opened a UnixStream and cleared CLOEXEC on it. The Client
+        // takes ownership of the fd from here on.
+        unsafe { std::env::remove_var(INHERITED_FD_ENV) };
+        match fd_str.parse::<i32>() {
+            Ok(fd) => match unsafe { Client::from_raw_fd(fd) } {
+                Ok(c) => return Some(c),
+                Err(e) => eprintln!("[error] inherited cmux fd unusable: {e}"),
+            },
+            Err(e) => eprintln!("[error] {INHERITED_FD_ENV} not an int: {e}"),
+        }
+    }
+    match Client::connect(&cmux::socket_path()) {
+        Ok(c) => Some(c),
         Err(e) => {
             eprintln!("[error] cmux connect: {e}");
-            return;
+            None
         }
-    };
+    }
+}
 
-    let all = match cmux::find_waiting_surfaces(&mut client) {
+fn handle_press(
+    binding: &Binding,
+    consumed: &RefCell<HashSet<String>>,
+    client_cell: &RefCell<Option<Client>>,
+) {
+    let mut client_opt = client_cell.borrow_mut();
+    if client_opt.is_none() {
+        match Client::connect(&cmux::socket_path()) {
+            Ok(c) => *client_opt = Some(c),
+            Err(e) => {
+                eprintln!("[error] cmux connect: {e}");
+                return;
+            }
+        }
+    }
+    let client = client_opt.as_mut().expect("client just populated");
+
+    let all = match cmux::find_waiting_surfaces(client) {
         Ok(v) => v,
         Err(e) => {
             eprintln!("[error] notification query: {e}");
+            // Drop the connection so the next press tries to reconnect.
+            // (In daemon mode the reconnect will fail because cmux rejects
+            // orphans, but for foreground/cmux-restart cases it recovers.)
+            *client_opt = None;
             return;
         }
     };
@@ -110,7 +153,7 @@ fn handle_press(binding: &Binding, consumed: &RefCell<HashSet<String>>) {
     );
 
     if is_digit && target.kind == BodyKind::Unknown {
-        match cmux::read_text(&mut client, &target.surface_id, 30) {
+        match cmux::read_text(client, &target.surface_id, 30) {
             Ok(screen) => {
                 if cmux::detect_prompt_kind(&screen) != cmux::PromptKind::NumberedMenu {
                     println!(
@@ -121,17 +164,21 @@ fn handle_press(binding: &Binding, consumed: &RefCell<HashSet<String>>) {
             }
             Err(e) => {
                 eprintln!("    \u{2717} skipped: read_text failed: {e}");
+                *client_opt = None;
                 return;
             }
         }
     }
 
-    match cmux::inject_text(&mut client, &target.surface_id, &binding.send) {
+    match cmux::inject_text(client, &target.surface_id, &binding.send) {
         Ok(()) => {
             consumed.borrow_mut().insert(target.notification_id.clone());
             println!("    \u{2713} sent");
         }
-        Err(e) => eprintln!("    \u{2717} {e}"),
+        Err(e) => {
+            eprintln!("    \u{2717} {e}");
+            *client_opt = None;
+        }
     }
 }
 
