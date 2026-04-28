@@ -61,6 +61,24 @@ fn handle_press(binding: &Binding) {
                 "[route] {} -> {} ({})",
                 binding.hotkey, target.surface_id, preview
             );
+
+            if needs_menu_check(&binding.send) {
+                match cmux::read_text(&mut client, &target.surface_id, 30) {
+                    Ok(screen) => {
+                        if cmux::detect_prompt_kind(&screen) != cmux::PromptKind::NumberedMenu {
+                            println!(
+                                "    \u{2717} skipped: surface doesn't show a numbered menu (likely free-text input)"
+                            );
+                            return;
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("    \u{2717} skipped: read_text failed: {e}");
+                        return;
+                    }
+                }
+            }
+
             match cmux::inject_text(&mut client, &target.surface_id, &binding.send) {
                 Ok(()) => println!("    \u{2713} sent"),
                 Err(e) => eprintln!("    \u{2717} {e}"),
@@ -68,5 +86,29 @@ fn handle_press(binding: &Binding) {
         }
         Ok(None) => println!("[skip] {} pressed but no waiting agent", binding.hotkey),
         Err(e) => eprintln!("[error] notification query: {e}"),
+    }
+}
+
+fn needs_menu_check(send: &str) -> bool {
+    let trimmed = send.trim();
+    trimmed.len() == 1 && trimmed.chars().next().is_some_and(|c| c.is_ascii_digit())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn digit_send_requires_menu() {
+        assert!(needs_menu_check("1\n"));
+        assert!(needs_menu_check("2"));
+        assert!(needs_menu_check(" 3 "));
+    }
+
+    #[test]
+    fn arbitrary_text_does_not_require_menu() {
+        assert!(!needs_menu_check("echo hello\n"));
+        assert!(!needs_menu_check("y\n"));
+        assert!(!needs_menu_check("12\n"));
     }
 }
