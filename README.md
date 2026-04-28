@@ -28,28 +28,28 @@ cargo install --git https://github.com/AngryCatKR96/lazyack
 ## Quick start
 
 1. Make sure [cmux](https://github.com/manaflow-ai/cmux) is running.
-2. Run `lazyack` in any terminal.
+2. Run `lazyack run` in any terminal.
 3. While Claude Code shows a `[1] Yes / [2] / [3] No` menu inside cmux, press
    `Ctrl+Opt+Shift+1` (or `2`, `3`) from **any** application.
 
 lazyack routes the keystroke to the right cmux surface and Claude Code accepts
 the answer — no focus change.
 
-## Run in the background
+## Commands
 
-Use `-d` (or `--daemon`) to detach from the terminal:
-
-```bash
-lazyack -d
-# lazyack started in background (pid 12345, log: /Users/me/Library/Logs/lazyack.log)
-# Stop with: pkill lazyack
+```
+lazyack             # show this list
+lazyack run         # run in foreground (Ctrl+C to exit)
+lazyack run -d      # run in background, log to ~/Library/Logs/lazyack.log
+lazyack status      # is a daemon running? (exit 0 yes, 3 no)
+lazyack stop        # SIGTERM to the running daemon
+lazyack doctor      # diagnose cmux, hotkeys, common conflicts
 ```
 
-Logs go to `~/Library/Logs/lazyack.log`. To stop:
+State files:
 
-```bash
-pkill lazyack
-```
+- PID file: `~/Library/Caches/lazyack/lazyack.pid` (auto-cleaned on stop)
+- Log file: `~/Library/Logs/lazyack.log` (daemon mode only)
 
 For auto-start on login, wrap with launchd or `brew services` (formula
 service block coming in a future release).
