@@ -18,7 +18,10 @@ struct Cli {
 }
 
 #[derive(Subcommand)]
-enum Command {}
+enum Command {
+    #[command(about = "Diagnose configuration, cmux connectivity, and hotkey conflicts")]
+    Doctor,
+}
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
@@ -32,6 +35,7 @@ fn main() -> ExitCode {
     };
 
     let result = match cli.command {
+        Some(Command::Doctor) => lazyack::doctor::run(config),
         None => lazyack::daemon::run(config),
     };
 
