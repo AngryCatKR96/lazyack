@@ -1,20 +1,22 @@
 use std::collections::HashMap;
-use std::sync::Arc;
-use std::thread;
+use std::time::{Duration, Instant};
 
-use core_foundation::runloop::CFRunLoop;
 use global_hotkey::{
     GlobalHotKeyEvent, GlobalHotKeyManager, HotKeyState,
     hotkey::{Code, HotKey, Modifiers},
 };
+use tao::event_loop::{ControlFlow, EventLoopBuilder};
 
 fn main() {
+    let event_loop = EventLoopBuilder::new().build();
+
     let manager = GlobalHotKeyManager::new().expect("create hotkey manager");
 
+    let mods = Modifiers::CONTROL | Modifiers::ALT | Modifiers::SHIFT;
     let bindings = [
-        ("1", HotKey::new(Some(Modifiers::META | Modifiers::ALT), Code::Digit1)),
-        ("2", HotKey::new(Some(Modifiers::META | Modifiers::ALT), Code::Digit2)),
-        ("3", HotKey::new(Some(Modifiers::META | Modifiers::ALT), Code::Digit3)),
+        ("1", HotKey::new(Some(mods), Code::Digit1)),
+        ("2", HotKey::new(Some(mods), Code::Digit2)),
+        ("3", HotKey::new(Some(mods), Code::Digit3)),
     ];
 
     let mut name_by_id: HashMap<u32, &'static str> = HashMap::new();
@@ -22,31 +24,20 @@ fn main() {
         manager.register(*hk).expect("register hotkey");
         name_by_id.insert(hk.id(), name);
     }
-    let name_by_id = Arc::new(name_by_id);
 
-    println!("lazyack PoC ready.");
-    println!("Press Cmd+Opt+1 / Cmd+Opt+2 / Cmd+Opt+3 anywhere on the system.");
+    println!("lazyack PoC ready. Press Ctrl+Opt+Shift+1 / 2 / 3 anywhere.");
     println!("Ctrl+C to exit.");
-    println!();
-    println!(
-        "First run: macOS will ask for Accessibility / Input Monitoring permission for your terminal."
-    );
-    println!("Grant it in System Settings and re-run.");
-    println!();
 
-    let names = name_by_id.clone();
-    thread::spawn(move || {
-        let receiver = GlobalHotKeyEvent::receiver();
-        while let Ok(event) = receiver.recv() {
+    let receiver = GlobalHotKeyEvent::receiver();
+
+    event_loop.run(move |_event, _, control_flow| {
+        *control_flow = ControlFlow::WaitUntil(Instant::now() + Duration::from_millis(300));
+
+        while let Ok(event) = receiver.try_recv() {
             if event.state == HotKeyState::Pressed {
-                let name = names.get(&event.id).copied().unwrap_or("?");
-                println!("[hotkey] Cmd+Opt+{name} pressed");
+                let name = name_by_id.get(&event.id).copied().unwrap_or("?");
+                println!("[hotkey] Ctrl+Opt+Shift+{name}");
             }
         }
     });
-
-    // Carbon HotKey events dispatch through the main-thread run loop.
-    CFRunLoop::run_current();
-
-    drop(manager);
 }
