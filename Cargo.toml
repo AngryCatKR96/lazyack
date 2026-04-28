@@ -1,6 +1,6 @@
 [package]
 name = "lazyack"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 description = "Global hotkey to approve AI coding agent prompts without switching focus."
 license = "MIT"
