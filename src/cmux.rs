@@ -35,6 +35,7 @@ impl Client {
 
 #[derive(Debug, Clone)]
 pub struct WaitingSurface {
+    pub notification_id: String,
     pub surface_id: String,
     pub body: String,
     pub workspace_id: String,
@@ -78,6 +79,7 @@ pub fn find_waiting_surfaces(client: &mut Client) -> std::io::Result<Vec<Waiting
         }
         if let Some(surface_id) = n["surface_id"].as_str() {
             out.push(WaitingSurface {
+                notification_id: n["id"].as_str().unwrap_or("").to_string(),
                 surface_id: surface_id.to_string(),
                 body: body.to_string(),
                 workspace_id: n["workspace_id"].as_str().unwrap_or("").to_string(),

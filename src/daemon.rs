@@ -1,4 +1,5 @@
-use std::collections::HashMap;
+use std::cell::RefCell;
+use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
 use global_hotkey::{
@@ -30,6 +31,7 @@ pub fn run(config: Config) -> Result<(), String> {
     println!("\nlazyack ready. Ctrl+C to exit.\n");
 
     let receiver = GlobalHotKeyEvent::receiver();
+    let consumed: RefCell<HashSet<String>> = RefCell::new(HashSet::new());
 
     event_loop.run(move |_event, _, control_flow| {
         *control_flow = ControlFlow::WaitUntil(Instant::now() + Duration::from_millis(300));
@@ -38,13 +40,13 @@ pub fn run(config: Config) -> Result<(), String> {
                 continue;
             }
             if let Some(binding) = binding_by_id.get(&event.id) {
-                handle_press(binding);
+                handle_press(binding, &consumed);
             }
         }
     });
 }
 
-fn handle_press(binding: &Binding) {
+fn handle_press(binding: &Binding, consumed: &RefCell<HashSet<String>>) {
     let socket = cmux::socket_path();
     let mut client = match cmux::Client::connect(&socket) {
         Ok(c) => c,
@@ -54,7 +56,7 @@ fn handle_press(binding: &Binding) {
         }
     };
 
-    let candidates = match cmux::find_waiting_surfaces(&mut client) {
+    let all = match cmux::find_waiting_surfaces(&mut client) {
         Ok(v) => v,
         Err(e) => {
             eprintln!("[error] notification query: {e}");
@@ -62,8 +64,28 @@ fn handle_press(binding: &Binding) {
         }
     };
 
+    {
+        let live: HashSet<&str> = all.iter().map(|c| c.notification_id.as_str()).collect();
+        consumed.borrow_mut().retain(|id| live.contains(id.as_str()));
+    }
+
+    let candidates: Vec<&WaitingSurface> = {
+        let consumed_ref = consumed.borrow();
+        all.iter()
+            .filter(|c| !consumed_ref.contains(&c.notification_id))
+            .collect()
+    };
+
     if candidates.is_empty() {
-        println!("[skip] {} pressed but no waiting agent", binding.hotkey);
+        if all.is_empty() {
+            println!("[skip] {} pressed but no waiting agent", binding.hotkey);
+        } else {
+            println!(
+                "[skip] {} pressed but all {} waiting notification(s) already handled by lazyack",
+                binding.hotkey,
+                all.len()
+            );
+        }
         return;
     }
 
@@ -71,14 +93,7 @@ fn handle_press(binding: &Binding) {
 
     let target = pick_target(&candidates, is_digit);
     let Some(target) = target else {
-        let kinds: Vec<&str> = candidates
-            .iter()
-            .map(|c| match c.kind {
-                BodyKind::Menu => "menu",
-                BodyKind::FreeText => "free_text",
-                BodyKind::Unknown => "unknown",
-            })
-            .collect();
+        let kinds: Vec<&str> = candidates.iter().map(|c| kind_name(c.kind)).collect();
         println!(
             "[skip] {} requires a numbered-menu prompt; {} candidate(s) but none qualify ({:?})",
             binding.hotkey,
@@ -112,20 +127,39 @@ fn handle_press(binding: &Binding) {
     }
 
     match cmux::inject_text(&mut client, &target.surface_id, &binding.send) {
-        Ok(()) => println!("    \u{2713} sent"),
+        Ok(()) => {
+            consumed.borrow_mut().insert(target.notification_id.clone());
+            println!("    \u{2713} sent");
+        }
         Err(e) => eprintln!("    \u{2717} {e}"),
     }
 }
 
-fn pick_target<'a>(candidates: &'a [WaitingSurface], is_digit: bool) -> Option<&'a WaitingSurface> {
+fn kind_name(k: BodyKind) -> &'static str {
+    match k {
+        BodyKind::Menu => "menu",
+        BodyKind::FreeText => "free_text",
+        BodyKind::Unknown => "unknown",
+    }
+}
+
+fn pick_target<'a>(
+    candidates: &'a [&'a WaitingSurface],
+    is_digit: bool,
+) -> Option<&'a WaitingSurface> {
     if is_digit {
-        // For digit hotkeys: prefer Menu first, then Unknown (verified by pane), skip FreeText.
         candidates
             .iter()
             .find(|c| c.kind == BodyKind::Menu)
-            .or_else(|| candidates.iter().find(|c| c.kind == BodyKind::Unknown))
+            .copied()
+            .or_else(|| {
+                candidates
+                    .iter()
+                    .find(|c| c.kind == BodyKind::Unknown)
+                    .copied()
+            })
     } else {
-        candidates.first()
+        candidates.first().copied()
     }
 }
 
@@ -140,6 +174,7 @@ mod tests {
 
     fn ws(kind: BodyKind, body: &str) -> WaitingSurface {
         WaitingSurface {
+            notification_id: format!("N-{body}"),
             surface_id: format!("S-{body}"),
             body: body.to_string(),
             workspace_id: "W".to_string(),
@@ -161,26 +196,29 @@ mod tests {
 
     #[test]
     fn picks_menu_over_freetext_for_digit() {
-        let cands = vec![
+        let owned = vec![
             ws(BodyKind::FreeText, "waiting for your input"),
             ws(BodyKind::Menu, "needs your permission to use Bash"),
         ];
+        let cands: Vec<&WaitingSurface> = owned.iter().collect();
         let chosen = pick_target(&cands, true).unwrap();
         assert_eq!(chosen.kind, BodyKind::Menu);
     }
 
     #[test]
     fn returns_none_when_only_freetext_for_digit() {
-        let cands = vec![ws(BodyKind::FreeText, "waiting for your input")];
+        let owned = vec![ws(BodyKind::FreeText, "waiting for your input")];
+        let cands: Vec<&WaitingSurface> = owned.iter().collect();
         assert!(pick_target(&cands, true).is_none());
     }
 
     #[test]
     fn picks_first_for_non_digit() {
-        let cands = vec![
+        let owned = vec![
             ws(BodyKind::FreeText, "waiting for your input"),
             ws(BodyKind::Menu, "needs your permission"),
         ];
+        let cands: Vec<&WaitingSurface> = owned.iter().collect();
         let chosen = pick_target(&cands, false).unwrap();
         assert_eq!(chosen.kind, BodyKind::FreeText);
     }
