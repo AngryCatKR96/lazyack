@@ -1,0 +1,13 @@
+[package]
+name = "lazyack"
+version = "0.1.0"
+edition = "2024"
+description = "Global hotkey to approve AI coding agent prompts without switching focus."
+license = "MIT"
+repository = "https://github.com/AngryCatKR96/lazyack"
+homepage = "https://github.com/AngryCatKR96/lazyack"
+readme = "README.md"
+keywords = ["cli", "hotkey", "agent", "cmux", "tmux"]
+categories = ["command-line-utilities"]
+
+[dependencies]
