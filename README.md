@@ -35,6 +35,25 @@ cargo install --git https://github.com/AngryCatKR96/lazyack
 lazyack routes the keystroke to the right cmux surface and Claude Code accepts
 the answer — no focus change.
 
+## Run in the background
+
+Use `-d` (or `--daemon`) to detach from the terminal:
+
+```bash
+lazyack -d
+# lazyack started in background (pid 12345, log: /Users/me/Library/Logs/lazyack.log)
+# Stop with: pkill lazyack
+```
+
+Logs go to `~/Library/Logs/lazyack.log`. To stop:
+
+```bash
+pkill lazyack
+```
+
+For auto-start on login, wrap with launchd or `brew services` (formula
+service block coming in a future release).
+
 ## How it works
 
 When you press a configured hotkey, lazyack:
