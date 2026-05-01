@@ -30,7 +30,7 @@ cargo install --git https://github.com/AngryCatKR96/lazyack
 1. Make sure [cmux](https://github.com/manaflow-ai/cmux) is running.
 2. Run `lazyack run` in any terminal.
 3. While Claude Code shows a `[1] Yes / [2] / [3] No` menu inside cmux, press
-   `Ctrl+Opt+Shift+1` (or `2`, `3`) from **any** application.
+   `Ctrl+Shift+1` (or `2`, `3`) from **any** application.
 
 lazyack routes the keystroke to the right cmux surface and Claude Code accepts
 the answer — no focus change.
@@ -80,23 +80,56 @@ absent):
 ```json
 {
   "bindings": [
-    { "hotkey": "ctrl+alt+shift+1", "send": "1\n" },
-    { "hotkey": "ctrl+alt+shift+2", "send": "2\n" },
-    { "hotkey": "ctrl+alt+shift+3", "send": "3\n" }
+    { "hotkey": "ctrl+shift+1", "send": "1\n" },
+    { "hotkey": "ctrl+shift+2", "send": "2\n" },
+    { "hotkey": "ctrl+shift+3", "send": "3\n" }
   ]
 }
 ```
 
-**Hotkey syntax**: `mod+mod+...+key` (case-insensitive).
+Each entry in `bindings` registers one global hotkey. Restart `lazyack` after
+editing the file (no live reload yet).
 
-- Modifier aliases: `cmd`/`command`/`super`/`meta`, `ctrl`/`control`,
-  `alt`/`opt`/`option`, `shift`.
-- Keys: digits `0`–`9`, letters `a`–`z`, `f1`–`f20`,
-  `enter`/`space`/`tab`/`escape`/`backspace`/`delete`/`up`/`down`/`left`/`right`.
+### `hotkey` syntax
 
-**`send` field**: sent as raw text to the target surface. Include `\n` for
-Enter. If `send` is a single digit, lazyack only fires when the target shows
-a numbered menu (so `1` never lands in a free-text Claude prompt by accident).
+`modifier+modifier+...+key` — joined with `+`, case-insensitive, whitespace
+around tokens is ignored. Exactly one key is required; modifiers are optional
+but recommended (lone keys collide with normal typing).
+
+**Modifiers** (any combination, order doesn't matter):
+
+| Token | Aliases | macOS key |
+| --- | --- | --- |
+| `cmd` | `command`, `super`, `meta`, `win` | ⌘ Command |
+| `ctrl` | `control` | ⌃ Control |
+| `alt` | `opt`, `option` | ⌥ Option |
+| `shift` | — | ⇧ Shift |
+
+**Keys** (pick one):
+
+| Category | Tokens |
+| --- | --- |
+| Digits | `0` – `9` |
+| Letters | `a` – `z` |
+| Function | `f1` – `f20` |
+| Navigation | `up`, `down`, `left`, `right` |
+| Whitespace | `space`, `tab`, `enter` (alias `return`) |
+| Editing | `backspace`, `delete` (alias `del`), `escape` (alias `esc`) |
+
+Examples:
+
+```json
+{ "hotkey": "ctrl+shift+1",        "send": "1\n" }
+{ "hotkey": "cmd+alt+y",           "send": "y\n" }
+{ "hotkey": "Ctrl + Shift + Esc",  "send": "no\n" }
+{ "hotkey": "f19",                 "send": "1\n" }
+```
+
+### `send` field
+
+Sent as raw text to the target surface. Include `\n` for Enter. If `send` is
+a single digit, lazyack only fires when the target shows a numbered menu (so
+`1` never lands in a free-text Claude prompt by accident).
 
 ### Power-user setup with Karabiner-Elements
 
@@ -124,9 +157,9 @@ $ lazyack doctor
 [✓] notification.list -> 9 total, unread: 1 menu / 0 free-text / 0 other
 
 # Hotkeys (3 configured)
-[✓] ctrl+alt+shift+1 can be registered
-[✓] ctrl+alt+shift+2 can be registered
-[✓] ctrl+alt+shift+3 can be registered
+[✓] ctrl+shift+1 can be registered
+[✓] ctrl+shift+2 can be registered
+[✓] ctrl+shift+3 can be registered
 
 # Karabiner-Elements
 [!] config detected at /Users/me/.config/karabiner/karabiner.json
