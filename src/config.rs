@@ -19,15 +19,15 @@ impl Config {
         Self {
             bindings: vec![
                 Binding {
-                    hotkey: "ctrl+alt+shift+1".into(),
+                    hotkey: "ctrl+shift+1".into(),
                     send: "1\n".into(),
                 },
                 Binding {
-                    hotkey: "ctrl+alt+shift+2".into(),
+                    hotkey: "ctrl+shift+2".into(),
                     send: "2\n".into(),
                 },
                 Binding {
-                    hotkey: "ctrl+alt+shift+3".into(),
+                    hotkey: "ctrl+shift+3".into(),
                     send: "3\n".into(),
                 },
             ],
@@ -175,13 +175,132 @@ mod tests {
     }
 
     #[test]
+    fn parses_every_modifier_alias() {
+        let cases = [
+            ("cmd+a", Modifiers::META),
+            ("command+a", Modifiers::META),
+            ("super+a", Modifiers::META),
+            ("meta+a", Modifiers::META),
+            ("win+a", Modifiers::META),
+            ("ctrl+a", Modifiers::CONTROL),
+            ("control+a", Modifiers::CONTROL),
+            ("alt+a", Modifiers::ALT),
+            ("opt+a", Modifiers::ALT),
+            ("option+a", Modifiers::ALT),
+            ("shift+a", Modifiers::SHIFT),
+        ];
+        for (input, expected) in cases {
+            let (m, _) = parse_hotkey(input).expect(input);
+            assert!(m.contains(expected), "{input} should set {expected:?}");
+        }
+    }
+
+    #[test]
     fn rejects_unknown_key() {
         assert!(parse_hotkey("ctrl+nope").is_err());
+    }
+
+    #[test]
+    fn rejects_unknown_modifier() {
+        assert!(parse_hotkey("hyper+a").is_err());
+    }
+
+    #[test]
+    fn rejects_empty_input() {
+        assert!(parse_hotkey("").is_err());
+    }
+
+    #[test]
+    fn parses_lone_key_with_no_modifier() {
+        let (m, c) = parse_hotkey("f19").unwrap();
+        assert!(m.is_empty());
+        assert_eq!(c, Code::F19);
     }
 
     #[test]
     fn parses_function_keys() {
         let (_, c) = parse_hotkey("f19").unwrap();
         assert_eq!(c, Code::F19);
+        let (_, c) = parse_hotkey("F1").unwrap();
+        assert_eq!(c, Code::F1);
+        let (_, c) = parse_hotkey("f20").unwrap();
+        assert_eq!(c, Code::F20);
+    }
+
+    #[test]
+    fn parses_all_digits() {
+        let expected = [
+            Code::Digit0,
+            Code::Digit1,
+            Code::Digit2,
+            Code::Digit3,
+            Code::Digit4,
+            Code::Digit5,
+            Code::Digit6,
+            Code::Digit7,
+            Code::Digit8,
+            Code::Digit9,
+        ];
+        for (i, code) in expected.iter().enumerate() {
+            let (_, c) = parse_hotkey(&i.to_string()).unwrap();
+            assert_eq!(c, *code);
+        }
+    }
+
+    #[test]
+    fn parses_letter_keys() {
+        let (_, c) = parse_hotkey("a").unwrap();
+        assert_eq!(c, Code::KeyA);
+        let (_, c) = parse_hotkey("z").unwrap();
+        assert_eq!(c, Code::KeyZ);
+        let (_, c) = parse_hotkey("ctrl+M").unwrap();
+        assert_eq!(c, Code::KeyM);
+    }
+
+    #[test]
+    fn parses_navigation_keys() {
+        assert_eq!(parse_hotkey("up").unwrap().1, Code::ArrowUp);
+        assert_eq!(parse_hotkey("down").unwrap().1, Code::ArrowDown);
+        assert_eq!(parse_hotkey("left").unwrap().1, Code::ArrowLeft);
+        assert_eq!(parse_hotkey("right").unwrap().1, Code::ArrowRight);
+    }
+
+    #[test]
+    fn parses_named_key_aliases() {
+        assert_eq!(parse_hotkey("enter").unwrap().1, Code::Enter);
+        assert_eq!(parse_hotkey("return").unwrap().1, Code::Enter);
+        assert_eq!(parse_hotkey("escape").unwrap().1, Code::Escape);
+        assert_eq!(parse_hotkey("esc").unwrap().1, Code::Escape);
+        assert_eq!(parse_hotkey("delete").unwrap().1, Code::Delete);
+        assert_eq!(parse_hotkey("del").unwrap().1, Code::Delete);
+        assert_eq!(parse_hotkey("backspace").unwrap().1, Code::Backspace);
+        assert_eq!(parse_hotkey("space").unwrap().1, Code::Space);
+        assert_eq!(parse_hotkey("tab").unwrap().1, Code::Tab);
+    }
+
+    #[test]
+    fn is_case_insensitive() {
+        let (m, c) = parse_hotkey("CTRL+Shift+A").unwrap();
+        assert!(m.contains(Modifiers::CONTROL));
+        assert!(m.contains(Modifiers::SHIFT));
+        assert_eq!(c, Code::KeyA);
+    }
+
+    #[test]
+    fn tolerates_whitespace_around_tokens() {
+        let (m, c) = parse_hotkey("ctrl + shift + 1").unwrap();
+        assert!(m.contains(Modifiers::CONTROL));
+        assert!(m.contains(Modifiers::SHIFT));
+        assert_eq!(c, Code::Digit1);
+    }
+
+    #[test]
+    fn defaults_match_expected_bindings() {
+        let cfg = Config::defaults();
+        assert_eq!(cfg.bindings.len(), 3);
+        for (i, b) in cfg.bindings.iter().enumerate() {
+            assert!(parse_hotkey(&b.hotkey).is_ok(), "{} parses", b.hotkey);
+            assert_eq!(b.send, format!("{}\n", i + 1));
+        }
     }
 }
